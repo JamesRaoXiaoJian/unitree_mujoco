@@ -9,6 +9,7 @@
 #include <unitree/idl/hg/BmsState_.hpp>
 #include <unitree/idl/hg/IMUState_.hpp>
 
+#include <array>
 #include <iostream>
 
 #include "param.h"
@@ -175,16 +176,8 @@ public:
     {
         if(!mj_data_) return;
         if(lowstate->joystick) { lowstate->joystick->update(); }
-        // lowcmd
-        {
-            std::lock_guard<std::mutex> lock(lowcmd->mutex_);
-            for(int i(0); i<num_motor_; i++) {
-                auto & m = lowcmd->msg_.motor_cmd()[i];
-                mj_data_->ctrl[i] = m.tau() +
-                                    m.kp() * (m.q() - mj_data_->sensordata[i]) +
-                                    m.kd() * (m.dq() - mj_data_->sensordata[i + num_motor_]);
-            }
-        }
+        // lowcmd / arm_sdk ctrl
+        compute_ctrl();
 
         // lowstate
         if(lowstate->trylock()) {
@@ -249,7 +242,19 @@ public:
     std::unique_ptr<WirelessController_t> wireless_controller;
     std::shared_ptr<LowCmd_t> lowcmd;
     std::unique_ptr<LowState_t> lowstate;
-    
+
+protected:
+    virtual void compute_ctrl()
+    {
+        std::lock_guard<std::mutex> lock(lowcmd->mutex_);
+        for(int i(0); i<num_motor_; i++) {
+            auto & m = lowcmd->msg_.motor_cmd()[i];
+            mj_data_->ctrl[i] = m.tau() +
+                                m.kp() * (m.q() - mj_data_->sensordata[i]) +
+                                m.kd() * (m.dq() - mj_data_->sensordata[i + num_motor_]);
+        }
+    }
+
 private:
     unitree::common::RecurrentThreadPtr thread_;
 };
@@ -273,6 +278,9 @@ public:
         bmsstate->msg_.soc() = 100;
 
         secondary_imustate = std::make_unique<IMUState_t>("rt/secondary_imu");
+
+        // Subscribe to arm_sdk for weight mechanism
+        arm_sdk = std::make_shared<unitree::robot::g1::subscription::LowCmd>("rt/arm_sdk");
     }
 
     void run() override
@@ -316,8 +324,87 @@ public:
         bmsstate->unlockAndPublish();
     }
 
+protected:
+    void compute_ctrl() override
+    {
+        // Read weight from arm_sdk message (kNotUsedJoint = 29)
+        {
+            std::lock_guard<std::mutex> lock(arm_sdk->mutex_);
+            weight_ = arm_sdk->msg_.motor_cmd()[29].q();
+        }
+
+        // Record initial standing pose (first call)
+        if (!pose_recorded_) {
+            for (int i = 0; i < num_motor_; i++) {
+                builtin_pose_[i] = mj_data_->sensordata[i];
+            }
+            pose_recorded_ = true;
+        }
+
+        // Detect first real command (non-zero kp on any joint)
+        if (!cmd_received_) {
+            std::lock_guard<std::mutex> lock(arm_sdk->mutex_);
+            for (int i = 0; i < num_motor_; i++) {
+                if (arm_sdk->msg_.motor_cmd()[i].kp() > 0.0f) {
+                    cmd_received_ = true;
+                    break;
+                }
+            }
+        }
+
+        if (weight_ > 0.0f || !cmd_received_) {
+            // Weight blending mode: builtin + user cmd
+            // Also used before any command arrives (cmd_received_=false) to hold standing pose
+            std::lock_guard<std::mutex> lock(arm_sdk->mutex_);
+            for (int i = 0; i < num_motor_; i++) {
+                auto& m = arm_sdk->msg_.motor_cmd()[i];
+                float user_ctrl = m.tau() +
+                    m.kp() * (m.q() - mj_data_->sensordata[i]) +
+                    m.kd() * (m.dq() - mj_data_->sensordata[i + num_motor_]);
+
+                // Builtin: PD hold initial standing pose
+                float builtin_ctrl =
+                    builtin_kp_[i] * (builtin_pose_[i] - mj_data_->sensordata[i]) +
+                    builtin_kd_[i] * (0.0f - mj_data_->sensordata[i + num_motor_]);
+
+                float w = cmd_received_ ? weight_ : 0.0f;
+                mj_data_->ctrl[i] = w * user_ctrl + (1.0f - w) * builtin_ctrl;
+            }
+        } else {
+            // Standard lowcmd mode (after command received, weight=0)
+            RobotBridge::compute_ctrl();
+        }
+    }
+
+private:
     using BmsState_t = unitree::robot::RealTimePublisher<unitree_hg::msg::dds_::BmsState_>;
     using IMUState_t = unitree::robot::RealTimePublisher<unitree_hg::msg::dds_::IMUState_>;
     std::unique_ptr<BmsState_t> bmsstate;
     std::unique_ptr<IMUState_t> secondary_imustate;
+
+private:
+    // arm_sdk subscriber (same message type as lowcmd)
+    std::shared_ptr<unitree::robot::g1::subscription::LowCmd> arm_sdk;
+
+    // Weight mechanism state
+    float weight_ = 0.0f;
+    std::array<float, 29> builtin_pose_;
+    bool pose_recorded_ = false;
+    bool cmd_received_ = false;
+
+    // Tuned PD gains from g1_stand.py example
+    const std::array<float, 29> builtin_kp_ = {
+        80, 80, 60, 120, 50, 50,   // left leg
+        80, 80, 60, 120, 50, 50,   // right leg
+        60, 40, 40,                 // waist
+        40, 40, 40, 40, 40, 40, 40,  // left arm
+        40, 40, 40, 40, 40, 40, 40,  // right arm
+    };
+    const std::array<float, 29> builtin_kd_ = {
+        2, 2, 2, 3, 1.5, 1.5,     // left leg
+        2, 2, 2, 3, 1.5, 1.5,     // right leg
+        2, 1.5, 1.5,               // waist
+        1, 1, 1, 1, 1, 1, 1,      // left arm
+        1, 1, 1, 1, 1, 1, 1,      // right arm
+    };
 };

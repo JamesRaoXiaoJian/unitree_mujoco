@@ -85,6 +85,9 @@ public:
 };
 inline ElasticBand elastic_band;
 
+// Startup hold: keep robot in keyframe pose until control script connects
+static int startup_hold_steps = 2000;  // ~4s at 500Hz render loop
+
 
 namespace
 {
@@ -461,8 +464,18 @@ namespace
               syncSim = d->time;
               sim.speed_changed = false;
 
-              // run single step, let next iteration deal with timing
-              mj_step(m, d);
+              // run single step (skip during startup hold)
+              static int hold_dbg = 0;
+              if (hold_dbg++ < 5) std::printf("[SIM] out-of-sync branch, hold=%d\n", startup_hold_steps);
+              if (startup_hold_steps > 0) {
+                startup_hold_steps--;
+                if (startup_hold_steps == 0) {
+                  std::printf("[SIM] Startup hold done, physics running.\n");
+                  mj_step(m, d);
+                }
+              } else {
+                mj_step(m, d);
+              }
               stepped = true;
             }
 
@@ -502,8 +515,14 @@ namespace
                   }
                 }
 
-                // call mj_step
-                mj_step(m, d);
+                // call mj_step (skip during startup hold)
+                static int insync_dbg = 0;
+                if (insync_dbg++ < 5) std::printf("[SIM] in-sync branch, hold=%d\n", startup_hold_steps);
+                if (startup_hold_steps > 0) {
+                  startup_hold_steps--;
+                } else {
+                  mj_step(m, d);
+                }
                 stepped = true;
 
                 // break if reset
@@ -547,6 +566,14 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
       d = mj_makeData(m);
     if (d)
     {
+      // Load keyframe 0 if available (e.g. "standing" pose for humanoids)
+      if (m->nkey > 0) {
+        mj_resetDataKeyframe(m, d, 0);
+        std::printf("[SIM] Loaded keyframe 0, nq=%d\n", m->nq);
+        std::printf("[SIM]   qpos[0..6] (base): %.4f %.4f %.4f | %.4f %.4f %.4f %.4f\n",
+                    d->qpos[0], d->qpos[1], d->qpos[2],
+                    d->qpos[3], d->qpos[4], d->qpos[5], d->qpos[6]);
+      }
       sim->Load(m, d, filename);
       mj_forward(m, d);
 

@@ -121,10 +121,10 @@
                     range="-0.2618 0.2618" actuatorfrcrange="-50 50" class="ankle_motor"/>
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0"
                     rgba="0.2 0.2 0.2 1" mesh="left_ankle_roll_link" />
-                  <geom size="0.005" pos="-0.05 0.025 -0.03" rgba="0.2 0.2 0.2 1" />
-                  <geom size="0.005" pos="-0.05 -0.025 -0.03" rgba="0.2 0.2 0.2 1" />
-                  <geom size="0.005" pos="0.12 0.03 -0.03" rgba="0.2 0.2 0.2 1" />
-                  <geom size="0.005" pos="0.12 -0.03 -0.03" rgba="0.2 0.2 0.2 1" />
+                  <geom size="0.02" pos="-0.05 0.025 -0.03" condim="6" friction="0.4 0.02 0.01" margin="0.001" rgba="0.2 0.2 0.2 1" />
+                  <geom size="0.02" pos="-0.05 -0.025 -0.03" condim="6" friction="0.4 0.02 0.01" margin="0.001" rgba="0.2 0.2 0.2 1" />
+                  <geom size="0.02" pos="0.12 0.03 -0.03" condim="6" friction="0.4 0.02 0.01" margin="0.001" rgba="0.2 0.2 0.2 1" />
+                  <geom size="0.02" pos="0.12 -0.03 -0.03" condim="6" friction="0.4 0.02 0.01" margin="0.001" rgba="0.2 0.2 0.2 1" />
                 </body>
               </body>
             </body>
@@ -181,10 +181,10 @@
                     range="-0.2618 0.2618" actuatorfrcrange="-50 50" class="ankle_motor" />
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0"
                     rgba="0.2 0.2 0.2 1" mesh="right_ankle_roll_link" />
-                  <geom size="0.005" pos="-0.05 0.025 -0.03" rgba="0.2 0.2 0.2 1" />
-                  <geom size="0.005" pos="-0.05 -0.025 -0.03" rgba="0.2 0.2 0.2 1" />
-                  <geom size="0.005" pos="0.12 0.03 -0.03" rgba="0.2 0.2 0.2 1" />
-                  <geom size="0.005" pos="0.12 -0.03 -0.03" rgba="0.2 0.2 0.2 1" />
+                  <geom size="0.02" pos="-0.05 0.025 -0.03" condim="6" friction="0.4 0.02 0.01" margin="0.001" rgba="0.2 0.2 0.2 1" />
+                  <geom size="0.02" pos="-0.05 -0.025 -0.03" condim="6" friction="0.4 0.02 0.01" margin="0.001" rgba="0.2 0.2 0.2 1" />
+                  <geom size="0.02" pos="0.12 0.03 -0.03" condim="6" friction="0.4 0.02 0.01" margin="0.001" rgba="0.2 0.2 0.2 1" />
+                  <geom size="0.02" pos="0.12 -0.03 -0.03" condim="6" friction="0.4 0.02 0.01" margin="0.001" rgba="0.2 0.2 0.2 1" />
                 </body>
               </body>
             </body>
@@ -522,5 +522,10 @@
     <gyro name="secondary_imu_gyro" site="secondary_imu" noise="5e-4" cutoff="34.9"/>
     <accelerometer name="secondary_imu_acc" site="secondary_imu" noise="1e-2" cutoff="157"/>
   </sensor>
+
+  <keyframe>
+    <!-- Standing pose: bent knees, arms at sides (from g1_stand.py example) -->
+    <key name="standing" qpos="0 0 0.793 1 0 0 0 -0.1 0 0 0.25 -0.15 0 -0.1 0 0 0.25 -0.15 0 0 0 0 0.2 0.2 0 0.8 0 0 0 0.2 -0.2 0 0.8 0 0 0"/>
+  </keyframe>
 
 </mujoco>
