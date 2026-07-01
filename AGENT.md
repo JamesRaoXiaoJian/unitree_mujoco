@@ -70,7 +70,39 @@
 | `simulate/src/main.cc` | 物理循环、startup hold |
 | `simulate/config.yaml` | domain_id=0 |
 | `example/g1_low_level/g1_stand.py` | 参考站立姿态和增益 |
-| `/home/james/Project/g1_motion_player/src/csv_replay.cpp` | 实机关键帧播放 |
+| `tools/g1_motion/csv_replay.cpp` | 关键帧播放工具 |
+| `tools/g1_motion/assets/*.csv` | 关键帧数据 |
+
+## G1 Keyframe Playback Tool
+
+**编译：**
+```bash
+cd tools/g1_motion && mkdir build && cd build
+cmake .. && make -j4
+```
+
+**运行：**
+```bash
+# 仿真
+./csv_replay ../assets/wave.csv lo
+# 实物
+./csv_replay ../assets/wave.csv enp3s0
+```
+
+**环境要求：**
+- unitree_sdk2 安装到 `/opt/unitree_robotics/`
+- config.yaml 中 domain_id=0（与 csv_replay 匹配）
+
+**关键帧 CSV 格式：** 36 列/行
+- 列 0-2: root 位置 (xyz)
+- 列 3-6: root 四元数 (xyzw)
+- 列 7-35: 29 个关节角（弧度）
+
+**weight 机制：**
+- motor_cmd[29].q() = weight
+- weight=0: 内建 PD 控制器保持站立
+- weight=1: 用户完全控制
+- Engage(0→1) → Transition → Replay → Disengage(1→0)
 
 ---
 

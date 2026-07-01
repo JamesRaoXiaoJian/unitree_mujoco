@@ -9,6 +9,7 @@
 - `unitree_robots`: MJCF description files for robots supported by unitree_sdk2
 - `terrain_tool`: Tool for generating terrain in simulation scenarios
 - `example`: Example programs
+- `tools/g1_motion`: G1 upper-body keyframe playback tool (arm_sdk + weight mechanism)
 
 ## Supported Unitree sdk2 Messages:
 **Current version only supports low-level development, mainly used for sim to real verification of controller**
@@ -308,3 +309,51 @@ source ~/unitree_ros2/setup.sh # Use the network card connected to the robot
 export ROS_DOMAIN_ID=0 # Use the default domain id
 ./install/stand_go2/bin/stand_go2 # Run
 ```
+
+## 4. G1 Keyframe Playback (`tools/g1_motion/`)
+
+G1 upper-body keyframe playback tool using `rt/arm_sdk` + weight mechanism. This tool sends CSV keyframe animations to the G1 robot (simulation or real) via DDS.
+
+### Build
+
+```bash
+cd tools/g1_motion
+mkdir build && cd build
+cmake ..
+make -j4
+```
+
+**Dependencies:** unitree_sdk2 installed at `/opt/unitree_robotics/`
+
+### Run
+
+```bash
+# Simulation (domain_id=0, interface=lo)
+./csv_replay ../assets/wave.csv lo
+
+# Real robot (domain_id=0, interface=NIC name)
+./csv_replay ../assets/wave.csv enp3s0
+```
+
+**Prerequisites:**
+1. Simulator running with G1 model: `./unitree_mujoco -r g1 -s scene_29dof.xml`
+2. `config.yaml` must have `domain_id: 0` (csv_replay uses domain 0)
+
+### Keyframe CSV Format
+
+36 columns per row (no header):
+- Columns 0-2: Root position (xyz)
+- Columns 3-6: Root quaternion (xyzw)
+- Columns 7-35: 29 joint angles (radians)
+
+### Weight Mechanism
+
+The tool uses the `rt/arm_sdk` topic with a weight value at `motor_cmd[29]`:
+- `weight=0`: Built-in PD controller holds standing pose
+- `weight=1`: User has full control
+
+Playback phases:
+1. **Engage** (1s): Ramp weight 0→1
+2. **Transition** (2s): Smooth move to first keyframe (velocity clamped at 0.5 rad/s)
+3. **Replay**: Play CSV frames at specified FPS (velocity clamped at 0.8 rad/s)
+4. **Disengage** (4s): Return to standing pose, ramp weight 1→0

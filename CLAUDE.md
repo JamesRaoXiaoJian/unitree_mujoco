@@ -99,46 +99,34 @@ Elastic band: virtual spring for humanoid harness simulation. Keyboard: `9` togg
 3. Run control code — it communicates with the simulator over DDS on localhost
 4. Deploy same control code to real robot with domain_id=0, interface=<robot NIC>
 
-## G1 arm_sdk 适配（进行中）
+### G1 Keyframe Playback Tool (`tools/g1_motion/`)
 
-### 需求
+G1 上半身关键帧播放工具，使用 `rt/arm_sdk` + weight 机制。
 
-让实机的 `csv_replay.cpp`（/home/james/Project/g1_motion_player）能直接在仿真中运行，无需修改代码。
+```bash
+cd tools/g1_motion && mkdir build && cd build
+cmake .. && make -j4
 
-### 已完成功能
+# 仿真 (domain_id=0, interface=lo)
+./csv_replay ../assets/wave.csv lo
 
-1. **arm_sdk weight 机制** — G1Bridge 订阅 `rt/arm_sdk`，读取 `motor_cmd[29]` 的 weight 值，混合内建控制器和用户指令
-2. **compute_ctrl() 重构** — RobotBridge 提取虚方法，G1Bridge 覆盖实现 weight 混合
-3. **cmd_received_ 检测** — 收到指令前用内建 PD 控制器保持站立
-4. **DDS domain_id** — config.yaml 从 1 改为 0（与 csv_replay 匹配）
-5. **keyframe 姿态** — 改为 g1_stand.py 的弯曲膝盖姿态（膝关节 0.25 rad）
-6. **PD 增益** — 按关节区分：膝=120, 髋=80, 踝=50, 臂=40
-7. **脚部碰撞球** — 从 5mm 增大到 20mm，添加 condim=6, friction=0.4
+# 实物 (domain_id=0, interface=网卡名)
+./csv_replay ../assets/wave.csv enp3s0
+```
 
-### 待解决问题：机器人无法站立
+**环境要求：** unitree_sdk2 已安装到 `/opt/unitree_robotics/`
 
-所有上述修复已应用但机器人仍无法在仿真中站立。
+**DDS 通信：**
+- 发布：`rt/arm_sdk`（LowCmd，weight 在 motor_cmd[29]）
+- 订阅：`rt/lowstate`
 
-#### 排查路径
+**关键帧格式：** CSV，36 列/行（root_xyz + root_quat + 29 关节角）
 
-| 尝试 | 问题 | 修复 | 结果 |
-|------|------|------|------|
-| 1 | keyframe 腿伸直（膝 0.03 rad） | 改为弯曲膝盖（0.25 rad） | 仍倒下 |
-| 2 | PD 增益统一 kp=50 | 按关节区分（膝=120） | 仍倒下 |
-| 3 | 脚部碰撞球 5mm | 增大到 20mm + friction | 仍倒下 |
+**weight 机制：**
+- `weight=0`：内建控制器维持站立
+- `weight=1`：用户完全控制
+- Engage（0→1）→ Transition → Replay → Disengage（1→0）
 
-#### 可能的剩余原因
+## G1 站立问题（待解决）
 
-1. **MuJoCo 仿真参数** — 没有 `<option>` 元素，可能需要调整 timestep、impratio、solver 参数
-2. **ctrl 信号时序** — bridge 线程写入 ctrl，但物理线程的 mj_step 可能在 ctrl 更新前执行
-3. **startup_hold 期间 ctrl 未应用** — hold 期间 mj_step 不执行，hold 结束后第一次 mj_step 使用的 ctrl 可能是旧值
-4. **脚部接触面形状** — 球体可能不如盒体稳定，考虑用 box geom 替代
-5. **keyframe 加载时序** — `mj_resetDataKeyframe` 在 `mj_makeData` 之后，但 `sim->Load()` 可能有异步操作覆盖 qpos
-
-#### 下一步调查方向
-
-- 添加调试输出：在 mj_step 前后打印 ctrl[] 和 qpos[] 的值
-- 检查 startup_hold 结束时 ctrl 是否非零
-- 尝试在 XML 中添加 `<option impratio="100" cone="elliptic" />`
-- 尝试用 box geom 替代球体作为脚部接触面
-- 检查是否需要在 bridge 的 compute_ctrl 中加锁 sim.mtx
+机器人无法在仿真中站立。已尝试：keyframe 弯曲膝盖、PD 增益按关节区分、脚部碰撞球增大。仍需排查 MuJoCo 仿真参数、ctrl 信号时序等问题。详见 AGENT.md。

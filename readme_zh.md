@@ -11,6 +11,7 @@
 - `unitree_robots`: unitree_sdk2 支持的机器人 mjcf 描述文件
 - `terrain_tool`: 仿真场景地形生成工具
 - `example`: 例程
+- `tools/g1_motion`: G1 上半身关键帧播放工具（arm_sdk + weight 机制）
 
 ## 支持的 Unitree sdk2 消息：
 **当前版本仅支持底层开发，主要用于控制器的 sim to real 验证**
@@ -316,3 +317,51 @@ source ~/unitree_ros2/setup.sh # 使用机器人连接的网卡
 export ROS_DOMAIN_ID=0 # 使用默认的 domain id 
 ./install/stand_go2/bin/stand_go2 # 运行
 ```
+
+## 4. G1 关键帧播放工具 (`tools/g1_motion/`)
+
+G1 上半身关键帧播放工具，使用 `rt/arm_sdk` + weight 机制，通过 DDS 向 G1 机器人（仿真或实物）发送 CSV 关键帧动画。
+
+### 编译
+
+```bash
+cd tools/g1_motion
+mkdir build && cd build
+cmake ..
+make -j4
+```
+
+**依赖：** unitree_sdk2 已安装到 `/opt/unitree_robotics/`
+
+### 运行
+
+```bash
+# 仿真 (domain_id=0, interface=lo)
+./csv_replay ../assets/wave.csv lo
+
+# 实物 (domain_id=0, interface=网卡名)
+./csv_replay ../assets/wave.csv enp3s0
+```
+
+**前置条件：**
+1. 仿真器已加载 G1 模型：`./unitree_mujoco -r g1 -s scene_29dof.xml`
+2. `config.yaml` 中 `domain_id: 0`（csv_replay 使用 domain 0）
+
+### 关键帧 CSV 格式
+
+每行 36 列（无表头）：
+- 列 0-2: 根节点位置 (xyz)
+- 列 3-6: 根节点四元数 (xyzw)
+- 列 7-35: 29 个关节角（弧度）
+
+### weight 机制
+
+工具使用 `rt/arm_sdk` 话题，weight 值在 `motor_cmd[29]` 中：
+- `weight=0`：内建 PD 控制器保持站立姿态
+- `weight=1`：用户完全控制
+
+播放阶段：
+1. **Engage** (1s)：weight 从 0 线性增加到 1
+2. **Transition** (2s)：平滑过渡到关键帧首帧（速度限制 0.5 rad/s）
+3. **Replay**：按指定 FPS 播放 CSV 帧（速度限制 0.8 rad/s）
+4. **Disengage** (4s)：回到站立姿态，weight 从 1 降到 0
