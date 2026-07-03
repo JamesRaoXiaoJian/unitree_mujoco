@@ -1,4 +1,20 @@
-# Introduction
+# Unitree MuJoCo
+
+<p align="center">
+  <a href="readme_zh.md">中文</a> · <a href="readme.md">English</a>
+</p>
+
+`unitree_mujoco` is a MuJoCo-based simulation environment integrated with Unitree SDK2. It is used for low-level controller verification, sim-to-real debugging, and robot behavior development with the same DDS message interfaces used by Unitree robots.
+
+This fork also includes G1-oriented additions:
+
+- G1 low-level simulation support through `unitree_hg` messages.
+- G1 secondary IMU publication on `rt/secondary_imu`.
+- `rt/arm_sdk` subscription and weight blending for G1 upper-body control.
+- `tools/g1_motion/`: CSV keyframe playback and state recording utilities for G1 arm experiments.
+
+## Introduction
+
 ## Unitree mujoco
 `unitree_mujoco` is a simulator developed based on `Unitree sdk2` and `mujoco`. Users can easily integrate the control programs developed with `Unitree_sdk2`, `unitree_ros2`, and `unitree_sdk2_python` into this simulator, enabling a seamless transition from simulation to physical development. The repository includes two versions of the simulator implemented in C++ and Python, with a structure as follows:
 ![](./doc/func.png)
@@ -232,7 +248,7 @@ if js_type == "xbox":
 ```
 
 ### Elastic band for humanoid 
-Consider humanoid robots are not suitable for starting in ground, a virtual elastic band was designed to simulate the lifting and lowering of humanoid robots. Setting ` enable_elastic_mand/ENABLE_ELSTIC_BAND=1 ` can enable the virtual elastic band. After loading the robot, press' 9 'to activate or release the strap, press' 7' to lower the robot, and press' 8 'to lift the robot.
+Consider humanoid robots are not suitable for starting on the ground, a virtual elastic band was designed to simulate the lifting and lowering of humanoid robots. Setting `enable_elastic_band/ENABLE_ELASTIC_BAND=1` can enable the virtual elastic band. After loading the robot, press `9` to activate or release the strap, press `7` to lower the robot, and press `8` to lift the robot.
 
 ## 2. Terrain Generation Tool
 We provide a tool to parametrically create simple terrains in the mujoco simulator, including stairs, rough ground, and height maps. The program is located in the `terrain_tool` folder. For specific usage instructions, refer to the README file in the `terrain_tool` folder.

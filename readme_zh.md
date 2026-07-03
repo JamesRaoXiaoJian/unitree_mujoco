@@ -1,7 +1,21 @@
+# Unitree MuJoCo
+
+<p align="center">
+  <a href="readme_zh.md">中文</a> · <a href="readme.md">English</a>
+</p>
+
+`unitree_mujoco` 是基于 MuJoCo 和 Unitree SDK2 的机器人仿真环境，用于低层控制器验证、sim-to-real 调试，以及使用 Unitree DDS 消息接口进行机器人行为开发。
+
+这个 fork 额外补充了面向 G1 的开发内容：
+
+- 基于 `unitree_hg` 消息的 G1 低层仿真支持。
+- G1 胸部 IMU 通过 `rt/secondary_imu` 发布。
+- 订阅 `rt/arm_sdk` 并支持 weight 机制，用于 G1 上肢控制。
+- `tools/g1_motion/`：G1 上肢 CSV 关键帧播放和状态记录工具。
 
 # 介绍
 ## Unitree mujoco
-`unitree_mujoco` 是基于 `Unitree sdk2` 和 `mujoco` 开发的仿真器。用户使用 `Unitree_sdk2`、 `unitree_ros2` 和 `unitree_sdk2_python` 开发的控制程序可以方便地接入该仿真器，实现仿真到实物的开发流程。仓库别基于 c++ 和 python 实现了两个版本的仿真器， 其结构大致如下图所示:
+`unitree_mujoco` 是基于 `Unitree sdk2` 和 `mujoco` 开发的仿真器。用户使用 `Unitree_sdk2`、 `unitree_ros2` 和 `unitree_sdk2_python` 开发的控制程序可以方便地接入该仿真器，实现仿真到实物的开发流程。仓库分别基于 c++ 和 python 实现了两个版本的仿真器， 其结构大致如下图所示:
 
 ![](./doc/func.png)
 
@@ -18,7 +32,7 @@
 - `LowCmd`: 电机控制指令
 - `LowState`：电机状态
 - `SportModeState`：机器人位置和速度
-- `IMUState`: 胸部IMU数据，话题为 `rt/secondary` (仅 G1)
+- `IMUState`: 胸部 IMU 数据，话题为 `rt/secondary_imu` (仅 G1)
 
 ## 消息(DDS idl)类型说明
 - Unitree Go2, B2, H1, B2w, Go2w 型号的机器人使用 unitree_go idl 实现底层通信
