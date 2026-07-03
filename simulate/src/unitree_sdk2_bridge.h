@@ -9,7 +9,9 @@
 #include <unitree/idl/hg/BmsState_.hpp>
 #include <unitree/idl/hg/IMUState_.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <iostream>
 
 #include "param.h"
@@ -40,7 +42,10 @@ public:
 
     }
 
+    virtual ~UnitreeSDK2BridgeBase() = default;
+
     virtual void start() {}
+    virtual void run() {}
 
     void printSceneInformation()
     {
@@ -166,13 +171,13 @@ public:
         wireless_controller->joystick = joystick;
     }
 
-    void start()
+    void start() override
     {
         thread_ = std::make_shared<unitree::common::RecurrentThread>(
             "unitree_bridge", UT_CPU_ID_NONE, 1000, [this]() { this->run(); });
     }
 
-    virtual void run()
+    void run() override
     {
         if(!mj_data_) return;
         if(lowstate->joystick) { lowstate->joystick->update(); }
@@ -264,6 +269,13 @@ using Go2Bridge = RobotBridge<unitree::robot::go2::subscription::LowCmd, unitree
 class G1Bridge : public RobotBridge<unitree::robot::g1::subscription::LowCmd, unitree::robot::g1::publisher::LowState>
 {
 public:
+    enum class ControlSource
+    {
+        BuiltinStand,
+        LowCmd,
+        ArmSdk,
+    };
+
     G1Bridge(mjModel *model, mjData *data) : RobotBridge(model, data)
     {
         if (param::config.robot.find("g1") != std::string::npos) {
@@ -281,6 +293,19 @@ public:
 
         // Subscribe to arm_sdk for weight mechanism
         arm_sdk = std::make_shared<unitree::robot::g1::subscription::LowCmd>("rt/arm_sdk");
+    }
+
+    const char* controlSourceName() const
+    {
+        switch (control_source_) {
+            case ControlSource::BuiltinStand:
+                return "builtin";
+            case ControlSource::LowCmd:
+                return "lowcmd";
+            case ControlSource::ArmSdk:
+                return "arm_sdk";
+        }
+        return "unknown";
     }
 
     void run() override
@@ -328,9 +353,22 @@ protected:
     void compute_ctrl() override
     {
         // Read weight from arm_sdk message (kNotUsedJoint = 29)
+        bool arm_sdk_active = false;
         {
             std::lock_guard<std::mutex> lock(arm_sdk->mutex_);
-            weight_ = arm_sdk->msg_.motor_cmd()[29].q();
+            if (!arm_sdk->isTimeout()) {
+                weight_ = arm_sdk->msg_.motor_cmd()[29].q();
+                arm_sdk_active = std::abs(weight_) > 1e-4f;
+                for (int i = 0; i < num_motor_; i++) {
+                    const auto& m = arm_sdk->msg_.motor_cmd()[i];
+                    if (m.kp() > 0.0f || m.kd() > 0.0f || std::abs(m.tau()) > 1e-4f) {
+                        arm_sdk_active = true;
+                        break;
+                    }
+                }
+            } else {
+                weight_ = 0.0f;
+            }
         }
 
         // Record initial standing pose (first call)
@@ -341,38 +379,44 @@ protected:
             pose_recorded_ = true;
         }
 
-        // Detect first real command (non-zero kp on any joint)
-        if (!cmd_received_) {
-            std::lock_guard<std::mutex> lock(arm_sdk->mutex_);
+        bool lowcmd_active = false;
+        if (!lowcmd->isTimeout()) {
+            std::lock_guard<std::mutex> lock(lowcmd->mutex_);
             for (int i = 0; i < num_motor_; i++) {
-                if (arm_sdk->msg_.motor_cmd()[i].kp() > 0.0f) {
-                    cmd_received_ = true;
+                const auto& m = lowcmd->msg_.motor_cmd()[i];
+                if (m.kp() > 0.0f || m.kd() > 0.0f || std::abs(m.tau()) > 1e-4f) {
+                    lowcmd_active = true;
                     break;
                 }
             }
         }
 
-        if (weight_ > 0.0f || !cmd_received_) {
-            // Weight blending mode: builtin + user cmd
-            // Also used before any command arrives (cmd_received_=false) to hold standing pose
+        if (arm_sdk_active) {
+            // arm_sdk is an upper-body interface. Keep lower-body standing
+            // control active even when arm_sdk weight reaches 1.0.
+            control_source_ = ControlSource::ArmSdk;
             std::lock_guard<std::mutex> lock(arm_sdk->mutex_);
+            float w = std::clamp(weight_, 0.0f, 1.0f);
             for (int i = 0; i < num_motor_; i++) {
-                auto& m = arm_sdk->msg_.motor_cmd()[i];
-                float user_ctrl = m.tau() +
-                    m.kp() * (m.q() - mj_data_->sensordata[i]) +
-                    m.kd() * (m.dq() - mj_data_->sensordata[i + num_motor_]);
-
-                // Builtin: PD hold initial standing pose
-                float builtin_ctrl =
-                    builtin_kp_[i] * (builtin_pose_[i] - mj_data_->sensordata[i]) +
-                    builtin_kd_[i] * (0.0f - mj_data_->sensordata[i + num_motor_]);
-
-                float w = cmd_received_ ? weight_ : 0.0f;
-                mj_data_->ctrl[i] = w * user_ctrl + (1.0f - w) * builtin_ctrl;
+                float builtin_ctrl = builtinStandCtrl(i);
+                if (isArmSdkJoint(i)) {
+                    const auto& m = arm_sdk->msg_.motor_cmd()[i];
+                    float user_ctrl = m.tau() +
+                        m.kp() * (m.q() - mj_data_->sensordata[i]) +
+                        m.kd() * (m.dq() - mj_data_->sensordata[i + num_motor_]);
+                    mj_data_->ctrl[i] = w * user_ctrl + (1.0f - w) * builtin_ctrl;
+                } else {
+                    mj_data_->ctrl[i] = builtin_ctrl;
+                }
             }
-        } else {
-            // Standard lowcmd mode (after command received, weight=0)
+        } else if (lowcmd_active) {
+            control_source_ = ControlSource::LowCmd;
             RobotBridge::compute_ctrl();
+        } else {
+            control_source_ = ControlSource::BuiltinStand;
+            for (int i = 0; i < num_motor_; i++) {
+                mj_data_->ctrl[i] = builtinStandCtrl(i);
+            }
         }
     }
 
@@ -390,7 +434,8 @@ private:
     float weight_ = 0.0f;
     std::array<float, 29> builtin_pose_;
     bool pose_recorded_ = false;
-    bool cmd_received_ = false;
+    ControlSource control_source_ = ControlSource::BuiltinStand;
+    static constexpr float builtin_stand_gain_scale_ = 8.0f;
 
     // Tuned PD gains from g1_stand.py example
     const std::array<float, 29> builtin_kp_ = {
@@ -407,4 +452,16 @@ private:
         1, 1, 1, 1, 1, 1, 1,      // left arm
         1, 1, 1, 1, 1, 1, 1,      // right arm
     };
+
+    bool isArmSdkJoint(int index) const
+    {
+        return index >= 12;
+    }
+
+    float builtinStandCtrl(int index) const
+    {
+        return builtin_stand_gain_scale_ *
+            (builtin_kp_[index] * (builtin_pose_[index] - mj_data_->sensordata[index]) +
+             builtin_kd_[index] * (0.0f - mj_data_->sensordata[index + num_motor_]));
+    }
 };

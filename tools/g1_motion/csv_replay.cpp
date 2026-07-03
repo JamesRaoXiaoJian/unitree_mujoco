@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -59,10 +61,6 @@ static const std::array<int, 12> kLegJoints = {
 // PD gains — 提高以获得更精准的跟踪
 static constexpr float kKp = 120.0f;
 static constexpr float kKd = 3.0f;
-// Leg joints: lower gains, just holding position
-static constexpr float kLegKp = 20.0f;
-static constexpr float kLegKd = 1.0f;
-
 // 速度钳位：Transition和Replay阶段都启用，确保稳定
 static constexpr float kTransitionMaxVel = 0.5f;  // rad/s
 static constexpr float kReplayMaxVel = 0.8f;      // rad/s，Replay阶段稍快
@@ -243,7 +241,8 @@ int main(int argc, char const* argv[]) {
         }
     });
 
-    // send: 同时发送上肢指令和下肢保持位置
+    // send: only command upper body. The simulator's G1Bridge keeps lower-body
+    // standing control active while blending arm_sdk commands.
     auto send = [&](const std::array<float, 17>& pos) {
         float w = weight.load();
         cmd.motor_cmd().at(kNotUsedJoint).q(w);
@@ -257,12 +256,12 @@ int main(int argc, char const* argv[]) {
             cmd.motor_cmd().at(kArmJoints[j]).tau(0);
         }
 
-        // 下肢关节：保持初始位置，防止 weight=1.0 时失去平衡控制
+        // Lower-body slots are intentionally left as no-op arm_sdk commands.
         for (int j = 0; j < 12; j++) {
-            cmd.motor_cmd().at(kLegJoints[j]).q(leg_cur[j]);
+            cmd.motor_cmd().at(kLegJoints[j]).q(0);
             cmd.motor_cmd().at(kLegJoints[j]).dq(0);
-            cmd.motor_cmd().at(kLegJoints[j]).kp(kLegKp);
-            cmd.motor_cmd().at(kLegJoints[j]).kd(kLegKd);
+            cmd.motor_cmd().at(kLegJoints[j]).kp(0);
+            cmd.motor_cmd().at(kLegJoints[j]).kd(0);
             cmd.motor_cmd().at(kLegJoints[j]).tau(0);
         }
 
