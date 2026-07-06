@@ -27,6 +27,8 @@
 - `example`: 例程
 - `tools/g1_motion`: G1 上半身关键帧播放工具（arm_sdk + weight 机制）
 
+G1 站立、headless 验证、GUI/Xvfb 运行和 CSV 动作播放流程见 [G1 站立和上半身动作运行手册](./docs/g1_motion_runbook_zh.md)。
+
 ## 支持的 Unitree sdk2 消息：
 **当前版本仅支持底层开发，主要用于控制器的 sim to real 验证**
 - `LowCmd`: 电机控制指令

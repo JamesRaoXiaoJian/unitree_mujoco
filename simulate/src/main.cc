@@ -105,8 +105,57 @@ namespace
 
   // control noise variables
   mjtNum *ctrlnoise = nullptr;
+  std::unique_ptr<UnitreeSDK2BridgeBase> unitree_interface = nullptr;
+  bool unitree_channel_initialized = false;
+
+  void GlfwErrorCallback(int error, const char* description)
+  {
+    std::fprintf(stderr, "[GLFW] error %d: %s\n", error, description ? description : "(null)");
+  }
 
   using Seconds = std::chrono::duration<double>;
+
+  void InitializeUnitreeBridge()
+  {
+    if (!m || !d)
+    {
+      return;
+    }
+
+    if (!unitree_channel_initialized)
+    {
+      unitree::robot::ChannelFactory::Instance()->Init(param::config.domain_id, param::config.interface);
+      unitree_channel_initialized = true;
+    }
+
+    int body_id = mj_name2id(m, mjOBJ_BODY, "torso_link");
+    if (body_id < 0)
+    {
+      body_id = mj_name2id(m, mjOBJ_BODY, "base_link");
+    }
+    param::config.band_attached_link = body_id >= 0 ? 6 * body_id : 0;
+
+    if (m->nu > NUM_MOTOR_IDL_GO)
+    {
+      unitree_interface = std::make_unique<G1Bridge>(m, d);
+    }
+    else
+    {
+      unitree_interface = std::make_unique<Go2Bridge>(m, d);
+    }
+
+    std::cout << "[SIM] Unitree bridge running synchronously in physics loop." << std::endl;
+  }
+
+  void StepPhysics()
+  {
+    if (unitree_interface)
+    {
+      unitree_interface->run();
+    }
+    mj_step(m, d);
+    mj_forward(m, d);
+  }
 
   //---------------------------------------- plugin handling -----------------------------------------
 
@@ -353,6 +402,7 @@ namespace
         {
           sim.Load(mnew, dnew, sim.dropfilename);
 
+          unitree_interface.reset();
           mj_deleteData(d);
           mj_deleteModel(m);
 
@@ -364,6 +414,8 @@ namespace
           free(ctrlnoise);
           ctrlnoise = (mjtNum *)malloc(sizeof(mjtNum) * m->nu);
           mju_zero(ctrlnoise, m->nu);
+
+          InitializeUnitreeBridge();
         }
         else
         {
@@ -383,6 +435,7 @@ namespace
         {
           sim.Load(mnew, dnew, sim.filename);
 
+          unitree_interface.reset();
           mj_deleteData(d);
           mj_deleteModel(m);
 
@@ -394,6 +447,8 @@ namespace
           free(ctrlnoise);
           ctrlnoise = static_cast<mjtNum *>(malloc(sizeof(mjtNum) * m->nu));
           mju_zero(ctrlnoise, m->nu);
+
+          InitializeUnitreeBridge();
         }
         else
         {
@@ -471,10 +526,10 @@ namespace
                 startup_hold_steps--;
                 if (startup_hold_steps == 0) {
                   std::printf("[SIM] Startup hold done, physics running.\n");
-                  mj_step(m, d);
+                  StepPhysics();
                 }
               } else {
-                mj_step(m, d);
+                StepPhysics();
               }
               stepped = true;
             }
@@ -521,7 +576,7 @@ namespace
                 if (startup_hold_steps > 0) {
                   startup_hold_steps--;
                 } else {
-                  mj_step(m, d);
+                  StepPhysics();
                 }
                 stepped = true;
 
@@ -581,6 +636,8 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
       free(ctrlnoise);
       ctrlnoise = static_cast<mjtNum *>(malloc(sizeof(mjtNum) * m->nu));
       mju_zero(ctrlnoise, m->nu);
+
+      InitializeUnitreeBridge();
     }
     else
     {
@@ -591,47 +648,12 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
   PhysicsLoop(*sim);
 
   // delete everything we allocated
+  unitree_interface.reset();
   free(ctrlnoise);
   mj_deleteData(d);
   mj_deleteModel(m);
 
   exit(0);
-}
-
-void *UnitreeSdk2BridgeThread(void *arg)
-{
-  // Wait for mujoco data
-  while (true)
-  {
-    if (d)
-    {
-      std::cout << "Mujoco data is prepared" << std::endl;
-      break;
-    }
-    usleep(500000);
-  }
-
-  unitree::robot::ChannelFactory::Instance()->Init(param::config.domain_id, param::config.interface);
-
-
-  int body_id = mj_name2id(m, mjOBJ_BODY, "torso_link");
-  if (body_id < 0) {
-    body_id = mj_name2id(m, mjOBJ_BODY, "base_link");
-  }
-  param::config.band_attached_link = 6 * body_id;
-  
-  std::unique_ptr<UnitreeSDK2BridgeBase> interface = nullptr;
-  if (m->nu > NUM_MOTOR_IDL_GO) {
-    interface = std::make_unique<G1Bridge>(m, d);
-  } else {
-    interface = std::make_unique<Go2Bridge>(m, d);
-  }
-  interface->start();
-  
-  while (true)
-  {
-    sleep(1);
-  }
 }
 //------------------------------------------ main --------------------------------------------------
 
@@ -705,12 +727,12 @@ int main(int argc, char **argv)
     param::config.robot_scene = proj_dir.parent_path() / "unitree_robots" / param::config.robot / param::config.robot_scene;
   }
 
+  glfwSetErrorCallback(GlfwErrorCallback);
+
   // simulate object encapsulates the UI
   auto sim = std::make_unique<mj::Simulate>(
     std::make_unique<mj::GlfwAdapter>(),
     &cam, &opt, &pert, /* is_passive = */ false);
-
-  std::thread unitree_thread(UnitreeSdk2BridgeThread, nullptr);
 
   // start physics thread
   std::thread physicsthreadhandle(&PhysicsThread, sim.get(), param::config.robot_scene.c_str());
